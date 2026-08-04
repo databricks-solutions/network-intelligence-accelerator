@@ -1,0 +1,22 @@
+command: [
+  "shiny",
+  "run",
+  # Do NOT add --reload here: on Databricks Apps it kills the Shiny session
+  # websocket and every panel renders blank.
+  "--host", "0.0.0.0",
+  "--port", "8000",
+  "app.py:app"
+]
+
+# No env: block on purpose. Every runtime value is injected by the Databricks
+# Asset Bundle at deploy time (see `resources.apps.rf_digital_twin.config` in
+# databricks.yml), so no workspace-specific identifier is committed here:
+#
+#   LAKEBASE_INSTANCE         Lakebase instance the app mints OAuth tokens for.
+#   PGDATABASE                Database inside that instance.
+#   SIONNA_JOB_ID             Job that renders cache misses on a GPU cluster.
+#   DATABRICKS_WORKSPACE_URL  Builds links into the Jobs UI for running renders.
+#
+# The Lakebase resource binding additionally populates PGHOST / PGPORT / PGUSER.
+# PGPASSWORD is deliberately NOT set — lakebase_client.py mints a short-lived
+# OAuth token via the Databricks SDK instead.

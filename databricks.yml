@@ -1,0 +1,248 @@
+# Databricks Asset Bundle for the Network Intelligence Accelerator.
+#
+# Deploys, in one pass:
+#   - the Lakebase Postgres instance + database that caches Sionna RT renders
+#   - a GPU job that renders off-menu configs on demand (cache misses)
+#   - a GPU job that runs the one-time setup / preset precompute
+#   - the RF Digital Twin Shiny app, bound to the Lakebase database and the job
+#   - the RF Agent Showcase static app
+#
+# Quickstart:
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+#   databricks bundle run setup_rf_digital_twin -t dev   # once, ~30-50 min on GPU
+#
+# The setup job must complete before the digital twin app has anything cached to
+# read. See docs/deployment.md for the full walkthrough, including the one manual
+# step the bundle can't cover (granting the app's service principal Postgres
+# access to tables your user owns).
+
+bundle:
+  name: network-intelligence-accelerator
+
+# ---------------------------------------------------------------------------
+# Variables. The defaults work as-is on a workspace where you can create a
+# Lakebase instance and a GPU cluster; override per target below or on the CLI
+# with `--var="catalog=my_catalog"`.
+# ---------------------------------------------------------------------------
+variables:
+  catalog:
+    description: "Unity Catalog catalog that holds the default cell-config table."
+    default: main
+  schema_name:
+    description: "Unity Catalog schema created by the setup job."
+    default: sionna_rf_data
+  lakebase_instance:
+    description: "Lakebase Postgres instance name for the render cache."
+    default: rf-digital-twin-pg
+  lakebase_database:
+    description: "Database created inside the Lakebase instance."
+    default: rf_digital_twin
+  lakebase_capacity:
+    description: "Lakebase instance sku. CU_1 is ~$0.30/hr and plenty for the cache."
+    default: CU_1
+  gpu_node_type:
+    description: >-
+      GPU instance for Sionna RT. Must ship NVIDIA OptiX — g4dn / g5 / g6 on AWS.
+      CPU and ARM (Graviton) nodes fail with `libnvoptix.so.1 could not be loaded`.
+    default: g5.xlarge
+  spark_version:
+    description: "DBR for the Sionna clusters. Plain runtime, not ML."
+    default: 16.4.x-scala2.13
+  samples_per_tx:
+    description: "Sionna rays per transmitter. 10^7 matches the article; drop to 10^6 for a fast smoke test."
+    default: "10000000"
+
+# ---------------------------------------------------------------------------
+# Targets. No workspace host is committed — pick the workspace via the CLI:
+#   databricks bundle deploy -t dev -p <profile>
+# or by exporting DATABRICKS_HOST.
+# ---------------------------------------------------------------------------
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      # `mode: production` requires an explicit root_path so only one copy is
+      # ever deployed. Point this at a shared service-principal path if a team
+      # (rather than one user) owns the prod deployment.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    # Optionally pin the identity that owns the deployed apps and jobs:
+    # run_as:
+    #   service_principal_name: <sp-application-id>
+
+resources:
+  # -------------------------------------------------------------------------
+  # Lakebase — the render cache. `cached_renders` holds PNG bytea keyed by a
+  # sha256 of the scene config, which is what makes cache hits sub-second.
+  # -------------------------------------------------------------------------
+  database_instances:
+    rf_digital_twin_pg:
+      name: ${var.lakebase_instance}
+      capacity: ${var.lakebase_capacity}
+
+  database_catalogs:
+    rf_digital_twin_db:
+      name: ${var.lakebase_database}
+      database_instance_name: ${resources.database_instances.rf_digital_twin_pg.name}
+      database_name: ${var.lakebase_database}
+      create_database_if_not_exists: true
+
+  # -------------------------------------------------------------------------
+  # Jobs. Both run Sionna RT, so both need the same GPU cluster spec and the
+  # same heavy pip deps. Single-node: Sionna does its own GPU parallelism, so
+  # workers would just idle.
+  # -------------------------------------------------------------------------
+  jobs:
+    # One-time: creates the UC schema, provisions Lakebase tables, and renders
+    # every preset in defaults.PRESETS into the cache. Idempotent — re-running
+    # only renders presets whose hash isn't cached yet.
+    setup_rf_digital_twin:
+      name: "[${bundle.target}] rf-digital-twin-setup"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema_name}
+        - name: lakebase_instance
+          default: ${var.lakebase_instance}
+        - name: lakebase_database
+          default: ${var.lakebase_database}
+      tasks:
+        - task_key: setup
+          job_cluster_key: sionna_gpu
+          # ~30-50 min for a cold full render of all 19 presets on g5.xlarge.
+          timeout_seconds: 7200
+          notebook_task:
+            notebook_path: ./apps/rf-digital-twin/setup/setup_rf_digital_twin.py
+            base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              lakebase_instance: "{{job.parameters.lakebase_instance}}"
+              lakebase_database: "{{job.parameters.lakebase_database}}"
+          libraries: &sionna_libraries
+            - pypi:
+                package: drjit
+            - pypi:
+                package: mitsuba
+            - pypi:
+                package: sionna-rt
+            - pypi:
+                package: "psycopg[binary]>=3.1.18"
+            - pypi:
+                package: "databricks-sdk>=0.55.0"
+      job_clusters:
+        - job_cluster_key: sionna_gpu
+          new_cluster: &sionna_gpu_cluster
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.gpu_node_type}
+            driver_node_type_id: ${var.gpu_node_type}
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            runtime_engine: STANDARD
+            spark_conf:
+              spark.master: "local[*]"
+              spark.databricks.cluster.profile: singleNode
+            custom_tags:
+              ResourceClass: SingleNode
+
+    # Cache miss path: the app submits this with a config the cache has never
+    # seen, and the job writes the render back into Lakebase when it finishes.
+    sionna_compute:
+      name: "[${bundle.target}] rf-digital-twin-sionna-compute"
+      # The app cancels a previous pending run before submitting a new one, but
+      # several users can each have one in flight.
+      max_concurrent_runs: 3
+      queue:
+        enabled: true
+      parameters:
+        - name: config_hash
+          default: ""
+        - name: scene_json
+          default: ""
+        - name: cells_json
+          default: ""
+        - name: lakebase_instance
+          default: ${var.lakebase_instance}
+        - name: lakebase_database
+          default: ${var.lakebase_database}
+      tasks:
+        - task_key: sionna_compute
+          job_cluster_key: sionna_gpu
+          # ~5-8 min cold (cluster spin-up dominates), ~2-3 min warm.
+          timeout_seconds: 1800
+          notebook_task:
+            notebook_path: ./apps/rf-digital-twin/jobs/sionna_compute_job.py
+            base_parameters:
+              config_hash: "{{job.parameters.config_hash}}"
+              scene_json: "{{job.parameters.scene_json}}"
+              cells_json: "{{job.parameters.cells_json}}"
+              lakebase_instance: "{{job.parameters.lakebase_instance}}"
+              lakebase_database: "{{job.parameters.lakebase_database}}"
+          libraries: *sionna_libraries
+      job_clusters:
+        - job_cluster_key: sionna_gpu
+          new_cluster: *sionna_gpu_cluster
+
+  # -------------------------------------------------------------------------
+  # Apps.
+  # -------------------------------------------------------------------------
+  apps:
+    rf_digital_twin:
+      name: "rf-digital-twin-${bundle.target}"
+      description: "Sionna RT digital twin over a Lakebase render cache"
+      source_code_path: ./apps/rf-digital-twin
+      resources:
+        # Populates PGHOST / PGPORT / PGDATABASE / PGUSER and provisions a
+        # Postgres role for the app's service principal. PGPASSWORD is not
+        # injected — lakebase_client.py mints a short-lived OAuth token.
+        - name: lakebase
+          description: "Lakebase Postgres cache for Sionna renders"
+          database:
+            instance_name: ${resources.database_instances.rf_digital_twin_pg.name}
+            database_name: ${var.lakebase_database}
+            permission: CAN_CONNECT_AND_CREATE
+        # CAN_MANAGE_RUN so the app can submit a render on a cache miss.
+        - name: sionna-job
+          description: "GPU job that renders off-menu configs"
+          job:
+            id: ${resources.jobs.sionna_compute.id}
+            permission: CAN_MANAGE_RUN
+      config:
+        command:
+          - shiny
+          - run
+          # Do NOT add --reload: on Databricks Apps it kills the Shiny session
+          # websocket and every panel renders blank.
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "8000"
+          - "app.py:app"
+        env:
+          - name: LAKEBASE_INSTANCE
+            value: ${var.lakebase_instance}
+          - name: PGDATABASE
+            value: ${var.lakebase_database}
+          - name: SIONNA_JOB_ID
+            value: ${resources.jobs.sionna_compute.id}
+          - name: DATABRICKS_WORKSPACE_URL
+            value: ${workspace.host}
+
+    rf_agent_showcase:
+      name: "rf-agent-showcase-${bundle.target}"
+      description: "Chapter 0 — self-optimizing RAN showcase (static front-end)"
+      source_code_path: ./apps/rf-agent-showcase
+      config:
+        # Pure static front-end: no cluster, database, or resource bindings.
+        command:
+          - python
+          - "-m"
+          - http.server
+          - "8000"
+          - "--bind"
+          - "0.0.0.0"
