@@ -102,7 +102,7 @@ app needs no setup at all — it's a static front-end.
 ## Verifying a cache hit
 
 The **Status** tab shows the live `config_hash`. When your sidebar values match a
-row in the [preset gallery](../README.md#preset-gallery), the first 12 characters
+row in the [preset gallery](presets.md), the first 12 characters
 of that hash equal the gallery's hash prefix. That's your confirmation you're
 about to hit the cache rather than trigger a live GPU render.
 

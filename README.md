@@ -1,17 +1,31 @@
 # Network Intelligence Accelerator
 
-An RF digital twin for cellular network planning, built on Databricks with
-[NVIDIA Sionna RT](https://nvlabs.github.io/sionna/rt/index.html).
+**An interactive RF digital twin for cellular network planning — [NVIDIA Sionna RT](https://nvlabs.github.io/sionna/rt/index.html) ray tracing on Databricks.**
 
-Edit a cell-network configuration in a sidebar and immediately see the resulting
-scene render, SINR coverage map, user-to-tower association, and SINR/RSS CDFs.
+✅ &nbsp;Ray-trace real 3D city geometry with NVIDIA Sionna RT on GPU compute.
+<br>✅ &nbsp;Flip between **19 precomputed network configurations in under a second** — a Lakebase Postgres cache turns a minutes-long ray-trace into a point lookup.
+<br>✅ &nbsp;Edit antenna arrays, frequency, bandwidth, power, polarization, and ray-tracing depth from a Shiny sidebar.
+<br>✅ &nbsp;Off-menu configurations fall through to a **live GPU render** that writes back to the cache — no dead ends.
+<br>✅ &nbsp;See SINR coverage maps, user-to-tower association, SINR/RSS CDFs, and KPI summaries per configuration.
+<br>✅ &nbsp;Deploy the whole stack — Lakebase, GPU jobs, and both apps — with one `databricks bundle deploy`.
+
+<!-- TODO: replace with the demo GIF (see docs/media.md for what to capture) -->
+<!-- ![RF Digital Twin demo](images/rf-digital-twin-demo.gif) -->
+
+---
+
+## Why this exists
+
+A Sionna ray-trace takes minutes on a GPU, which makes it useless for
+interactive exploration — an RF engineer can't explore a design space one
+five-minute render at a time.
+
+Precomputing a gallery of configurations into a Lakebase Postgres cache turns
+those minutes into a sub-second lookup, so designs become browsable in real
+time. Anything off-menu still falls through to a live GPU render, so the cache
+is an accelerator rather than a cage.
+
 The demo scene is the Arc de Triomphe (`etoile`) with a 7-cell mmWave network.
-
-The problem this solves: a Sionna ray-trace takes minutes on a GPU, which makes
-it useless for interactive exploration. Precomputing a gallery of configurations
-into a Lakebase Postgres cache turns those minutes into a sub-second lookup, so
-an RF engineer can flip between designs in real time — and anything off-menu
-still falls through to a live GPU render.
 
 ## What's in here
 
@@ -69,99 +83,13 @@ Delta, and the token-minting auth model: [docs/architecture.md](docs/architectur
 
 ## Preset gallery
 
-These 19 sidebar combinations resolve to a **cached render** (instant load).
-Anything outside this list triggers a live Sionna job.
+The setup job precomputes **19 configurations** into the cache — sweeps over
+antenna densification, frequency band, antenna pattern, polarization, TX power,
+bandwidth, and ray-tracing depth. Each group holds everything else steady and
+varies one knob, so you can compare like for like.
 
-> **Reading the tables:** every column is a sidebar input. To reach a row, type
-> **all** of its values — a partial match (e.g. 20 MHz bandwidth without also
-> setting the TX array) hashes to something new and falls through to the live
-> job. Values not called out keep their Config 1 defaults (28 GHz, 100 MHz,
-> tr38901, V, 44 dBm, max_depth 5, RX 2×2).
-
-Each group holds everything else steady and varies one knob, so you can compare
-like for like.
-
-### A — Antenna densification
-
-Only the TX array changes.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `4d99ce0ad66c` | **2 × 2** | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `1947611f5ab1` | **4 × 4** | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `07934c589015` | **8 × 2** *(= Config 1)* | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `9dc696f16498` | **8 × 8** | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `7d40e2f4cf67` | **16 × 16** *(= Config 2)* | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `1f83af551835` | **32 × 8** | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | 5 |
-
-### B — Frequency band ladder
-
-TX held at 8 × 2. Frequency and bandwidth change together, scaled to what each
-band realistically deploys with.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `c97b934ed651` | 8 × 2 | **1.8 GHz** | **20 MHz** | tr38901 | V | 44 dBm | 5 |
-| `8e58d2b3aa3b` | 8 × 2 | **2.6 GHz** | **20 MHz** | tr38901 | V | 44 dBm | 5 |
-| `2b4207dac650` | 8 × 2 | **3.5 GHz** | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `07934c589015` | 8 × 2 | **28 GHz** *(= Config 1)* | 100 MHz | tr38901 | V | 44 dBm | 5 |
-| `411bcd0ac9fc` | 8 × 2 | **39 GHz** | **400 MHz** | tr38901 | V | 44 dBm | 5 |
-
-The low end of this ladder is 1.8 GHz, not 700 MHz: the etoile scene's ITU
-`marble` material is only defined for 1–100 GHz.
-
-### C — Antenna pattern
-
-TX held at 16 × 16.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `7d40e2f4cf67` | 16 × 16 | 28 GHz | 100 MHz | **tr38901** *(= Config 2)* | V | 44 dBm | 5 |
-| `74315cd0c5a0` | 16 × 16 | 28 GHz | 100 MHz | **iso** | V | 44 dBm | 5 |
-| `4d5194498776` | 16 × 16 | 28 GHz | 100 MHz | **dipole** | V | 44 dBm | 5 |
-
-### D — Polarization
-
-TX held at 16 × 16, tr38901 pattern.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `7d40e2f4cf67` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | **V** *(= Config 2)* | 44 dBm | 5 |
-| `1dcfea9eb314` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | **VH** | 44 dBm | 5 |
-
-### E — TX power
-
-TX held at 16 × 16. Power applied uniformly across all 7 cells.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `4d3b2585ea77` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | **38 dBm** | 5 |
-| `7d40e2f4cf67` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | **44 dBm** *(= Config 2)* | 5 |
-| `c9960aa40101` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | **50 dBm** | 5 |
-
-### F — Bandwidth
-
-TX held at 16 × 16.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `1b0bae11e49c` | 16 × 16 | 28 GHz | **20 MHz** | tr38901 | V | 44 dBm | 5 |
-| `7d40e2f4cf67` | 16 × 16 | 28 GHz | **100 MHz** *(= Config 2)* | tr38901 | V | 44 dBm | 5 |
-| `d7d1abe8d6b0` | 16 × 16 | 28 GHz | **400 MHz** | tr38901 | V | 44 dBm | 5 |
-
-### G — Ray tracing fidelity
-
-TX held at 16 × 16. Only `max_depth` (reflection bounces) changes.
-
-| Hash prefix | TX array | Freq | BW | Pattern | Pol | TX power | max_depth |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `1bfc66c11279` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | **3** |
-| `7d40e2f4cf67` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | **5** *(= Config 2)* |
-| `74c31dcc5ea6` | 16 × 16 | 28 GHz | 100 MHz | tr38901 | V | 44 dBm | **8** |
-
-> The hashes above were generated against the default 7-cell layout. If you edit
-> `cell_configs_default` in Unity Catalog, every hash changes — re-run the setup
-> job and use the cheat sheet it prints instead of this table.
+Typing any of them into the sidebar loads in under a second. The full table of
+sidebar values and their config hashes: **[docs/presets.md](docs/presets.md)**.
 
 ## Repo layout
 

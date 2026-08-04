@@ -8,7 +8,7 @@ on a GPU becomes a sub-second point lookup.
 Deployment is handled by the bundle at the repo root — see the
 **[deployment guide](../../docs/deployment.md)**. Design rationale is in
 [architecture.md](../../docs/architecture.md). The
-[preset gallery](../../README.md#preset-gallery) lists the configurations that
+[preset gallery](../../docs/presets.md) lists the configurations that
 resolve to a cache hit.
 
 ## Files
@@ -38,7 +38,7 @@ resolve to a cache hit.
 1. Open the app — Config 1 (8×2 TX) auto-loads from the cache.
 2. Walk the tabs: **Scene render → SINR association → Users → CDFs → KPIs**.
 3. Edit the sidebar to match another row in the
-   [preset gallery](../../README.md#preset-gallery) — flipping to 16×16 for
+   [preset gallery](../../docs/presets.md) — flipping to 16×16 for
    Config 2 shows the densification story. Click **Render**: instant, from cache.
 4. Then type something off-menu. The Status banner shows
    `Sionna job submitted (run_id=…)`. Keep clicking cached presets while it runs;
