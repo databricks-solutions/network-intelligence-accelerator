@@ -9,8 +9,19 @@
 <br>✅ &nbsp;See SINR coverage maps, user-to-tower association, SINR/RSS CDFs, and KPI summaries per configuration.
 <br>✅ &nbsp;Deploy the whole stack — Lakebase, GPU jobs, and both apps — with one `databricks bundle deploy`.
 
-<!-- TODO: replace with the demo GIF (see docs/media.md for what to capture) -->
-<!-- ![RF Digital Twin demo](images/rf-digital-twin-demo.gif) -->
+## The digital twin — sub-second configuration flips
+
+Edit the network in the sidebar, hit Render, and a cached ray-trace comes back
+before you let go of the mouse.
+
+![RF Digital Twin demo](images/rf-digital-twin-demo.gif)
+
+## Chapter 0 — the network that fixes itself
+
+A self-running showcase: a new building throws an NLOS shadow across a downtown
+5G sector, and an agent ray-traces candidate configs to recommend the fix.
+
+![RF Agent Showcase demo](images/rf-agent-showcase-demo.gif)
 
 ---
 

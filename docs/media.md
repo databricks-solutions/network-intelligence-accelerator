@@ -4,6 +4,12 @@ What to capture for the README, and how to wire it in. The hero GIF is the
 single highest-leverage asset in the repo — the sub-second cache hit *is* the
 product, and it's invisible in prose.
 
+> **Both demo GIFs are now captured and committed** — `rf-digital-twin-demo.gif`
+> (13.6 MB) and `rf-agent-showcase-demo.gif` (21.3 MB), both 880×480 at 10 fps.
+> Keep the guidance below for re-captures. Note both exceed GitHub's ~10 MB
+> inline-render threshold, so they may render as click-through links rather than
+> auto-playing; see [Size and GitHub rendering](#size-and-github-rendering).
+
 ## Hero GIF — `images/rf-digital-twin-demo.gif`
 
 **What to show, in ~15–20 seconds.** The point is the *speed* of the flip, so
@@ -65,3 +71,28 @@ README depends on an external asset.
 exploratory notebook (scene render, per-config SINR maps, association plots, CDF
 comparison). Those are notebook illustrations — keep them where they are rather
 than promoting them to the README.
+
+## Size and GitHub rendering
+
+GitHub stops auto-playing inline images somewhere around 10 MB and falls back to
+a click-through link. Both current GIFs are above that (13.6 MB and 21.3 MB), so
+if they don't animate on the repo landing page, that's why — not a broken path.
+
+Re-encoding these with ffmpeg makes them *larger*, not smaller: they're already
+well-encoded, and a re-encode re-quantises frames that were fine. `gifsicle -O3
+--lossy` also gained size on the showcase capture. What actually works, in order
+of preference:
+
+1. **Cut duration.** Both run 32–36 s. Trimming to the 15–20 s that carries the
+   story is the only change that reliably halves the file with no quality cost.
+2. **Drop to 8 fps.** UI motion survives it; ray-trace stills don't move at all.
+3. **Narrow to 720px.** Still legible for a README embed.
+
+```bash
+# Trim to the first 18 seconds, keeping the existing encode
+ffmpeg -i images/rf-digital-twin-demo.gif -t 18 -c copy images/rf-digital-twin-demo-trimmed.gif
+```
+
+Alternative: convert to MP4 (roughly 10× smaller) and reference it as a video.
+GitHub renders committed `.mp4` inline with playback controls, though it loses
+the auto-play-on-scroll behaviour a GIF gets.
